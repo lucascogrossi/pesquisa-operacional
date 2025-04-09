@@ -22,14 +22,14 @@ with open('temp.txt', 'r') as f:
     print(f"Numero de maior ou igual: {num_more_or_equal}")
     print(f"Numero de menor ou igual: {num_less_or_equal}")
 
-    # Extrai os coeficientes da funcao objetivo
-    print(fn[3])
-    coefficients = np.array(re.findall(r'(-?\d+)\s*\*?\s*x\d+', fn[3]), dtype=float)
-    print(coefficients)
+    # Extrai os coeficientes da funcao objetiva
+    print(f"Funcao objetiva: {fn[3]}")
+    fn_coefficients = np.array(re.findall(r'(-?\d+)\s*\*?\s*x\d+', fn[3]), dtype=float)
+    print(f"Coeficientes da funcao objetiva: {fn_coefficients}")
 
     # Constroi a matriz custo
     cost_matrix = np.zeros(num_vars + num_more_or_equal + num_less_or_equal)
-    cost_matrix[:len(coefficients)] = coefficients
+    cost_matrix[:len(fn_coefficients)] = fn_coefficients
     print(f"Matriz custo: {cost_matrix}")
 
     # Constroi a matrix b
@@ -44,10 +44,20 @@ with open('temp.txt', 'r') as f:
             nums.append(constraint.split('=')[1].strip())
 
     b_matrix = np.array([num for num in nums], dtype=float)
-    print(b_matrix)
+    print(f"Matriz b: {b_matrix}")
 
     # Prox passo: construir matrix A
     # <= vira 1
     # >= vira -1
     # ignoramos o =
+
+    print(f"Resricoes: {constraints}")
+    for constraint in constraints:
+        print(re.findall(r'x\d+', constraint))
+
+
+    a_matrix = np.zeros((len(constraints), num_vars + num_more_or_equal + num_less_or_equal))
+    print(a_matrix)
+
+
 
