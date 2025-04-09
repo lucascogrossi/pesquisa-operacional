@@ -2,7 +2,10 @@ import numpy as np
 import re
 with open('temp.txt', 'r') as f:
     # Salva todo o conteudo do arquivo em uma variavel
-    data = f.readlines() 
+    data = f.readlines()
+    print("="*100)
+    print(data)
+    print("="*100)
  
     # Funcao objetiva
     fn = data[0].split()
@@ -32,12 +35,13 @@ with open('temp.txt', 'r') as f:
     cost_matrix[:len(fn_coefficients)] = fn_coefficients
     print(f"Matriz custo: {cost_matrix}")
 
-    # Constroi a matrix b
+    # Constroi a matriz b
     b_matrix = np.zeros(len(constraints))
     nums = []
     for constraint in constraints:
+        # https://stackoverflow.com/questions/6696027/how-to-split-elements-of-a-list
         if '<=' in constraint:
-            nums.append(constraint.split('<=')[1].strip()) # https://stackoverflow.com/questions/6696027/how-to-split-elements-of-a-list
+            nums.append(constraint.split('<=')[1].strip()) 
         elif '>=' in constraint:
             nums.append(constraint.split('>=')[1].strip())
         elif '=' in constraint and not ('<=' in constraint or '>=' in constraint):
@@ -46,18 +50,23 @@ with open('temp.txt', 'r') as f:
     b_matrix = np.array([num for num in nums], dtype=float)
     print(f"Matriz b: {b_matrix}")
 
-    # Prox passo: construir matrix A
+    # Prox passo: construir matriz A
     # <= vira 1
     # >= vira -1
     # ignoramos o =
-
-    print(f"Resricoes: {constraints}")
-    for constraint in constraints:
-        print(re.findall(r'x\d+', constraint))
-
-
     a_matrix = np.zeros((len(constraints), num_vars + num_more_or_equal + num_less_or_equal))
-    print(a_matrix)
+    print(f"Matriz A:\n{a_matrix}")
+    print(f"Resricoes: {constraints}")
+
+    # Primeiro colocamos os coeficientes
+    for i, constraint in enumerate(constraints):
+        constraints_coefs = re.findall(r'(-?\d+)\s*\*?\s*x\d+', constraint)
+        
+        for j, coef in enumerate(constraints_coefs):
+            a_matrix[i, j] = float(coef)
+    print(f"Matriz A completando:\n{a_matrix}")
+
+    # Prox passo: completar com os 1 e -1
 
 
 
