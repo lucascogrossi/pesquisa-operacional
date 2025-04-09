@@ -59,14 +59,24 @@ with open('temp.txt', 'r') as f:
     print(f"Resricoes: {constraints}")
 
     # Primeiro colocamos os coeficientes
+    #print(list(enumerate(constraints)))
     for i, constraint in enumerate(constraints):
         constraints_coefs = re.findall(r'(-?\d+)\s*\*?\s*x\d+', constraint)
+        #print(constraints_coefs)
         
         for j, coef in enumerate(constraints_coefs):
             a_matrix[i, j] = float(coef)
+        #print(f"Matriz A completando:\n{a_matrix}")
     print(f"Matriz A completando:\n{a_matrix}")
 
     # Prox passo: completar com os 1 e -1
+    for i, constraint in enumerate(constraints):
+        if '>=' in constraint:
+            a_matrix[i, -2] = -1
+        elif '<=' in constraint:
+            a_matrix[i, -1] = 1
+
+    print(f"Matriz A completando:\n{a_matrix}")
 
 
 
