@@ -101,9 +101,9 @@ def itera_simplex(A, b, c, B_idx, N_idx, max_iter=10000):
 
         # Passo 2: custos relativos
         c_B = [c[i] for i in B_idx]
-        lam = solve(transpose(B), c_B)                 # 2.1) B^T lambda = c_B
-        c_hat = [c[j] - dot(lam, col(A, j)) for j in N_idx]   # 2.2) c_Nj - lambda^T a_Nj
-        # 2.3) variavel a entrar: regra de Dantzig (menor custo relativo)
+        lam = solve(transpose(B), c_B)                 # B^T lambda = c_B
+        c_hat = [c[j] - dot(lam, col(A, j)) for j in N_idx]   # c_Nj - lambda^T a_Nj
+        # variavel a entrar: regra de Dantzig (menor custo relativo)
         k = min(range(len(N_idx)), key=lambda t: c_hat[t])
 
         # Passo 3: teste de otimalidade  ->  se c_hat_Nk >= 0, e otima
@@ -142,7 +142,7 @@ def resolve(A, b, c, num_vars):
             A[i] = [-v for v in A[i]]
             b[i] = -b[i]
 
-    # ---- Fase I: uma variavel artificial por restricao (base = identidade) ----
+    # Fase I: uma variavel artificial por restricao (base = identidade)
     A1 = [A[i] + [1.0 if j == i else 0.0 for j in range(m)] for i in range(m)]
     art = list(range(n, n + m))
     c_fase1 = [0.0] * n + [1.0] * m
@@ -164,7 +164,7 @@ def resolve(A, b, c, num_vars):
                     B_idx[pos], N_idx[jp] = N_idx[jp], B_idx[pos]
                     break
 
-    # ---- Fase II: custo original, artificiais proibidas de reentrar na base ----
+    # Fase II: custo original, artificiais proibidas de reentrar na base
     c_fase2 = list(c) + [0.0] * m
     N_idx = [j for j in N_idx if j not in art]
 
