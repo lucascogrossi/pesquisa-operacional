@@ -1,1 +1,0 @@
-# det (laplace recursivo), inversa, mmult

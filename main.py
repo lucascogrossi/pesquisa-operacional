@@ -1,225 +1,204 @@
-import numpy as np
 import re
 
+from BLAS import dot, matvec, inverse, transpose, solve
+
+
+def parse_coefs(expr, num_vars):
+    # coeficientes implicitos: 'x1' -> 1, '-x2' -> -1
+    coefs = [0.0] * num_vars
+    for raw, idx in re.findall(r'([+-]?\s*\d*\.?\d*)\s*\*?\s*x(\d+)', expr):
+        s = raw.replace(' ', '')
+        if s in ('', '+'):
+            val = 1.0
+        elif s == '-':
+            val = -1.0
+        else:
+            val = float(s)
+        coefs[int(idx) - 1] = val
+    return coefs
+
+
+def col(A, j):
+    return [linha[j] for linha in A]
+
+
+def cols(A, idxs):
+    return [[linha[j] for j in idxs] for linha in A]
+
+
 with open('data.txt', 'r') as f:
-
-    # Salva todo o conteudo do arquivo em uma variavel
     data = f.readlines()
-    print("="*80)
-    print(data)
-    print("="*80)
- 
-    # Funcao objetiva
-    fn = data[0].split()
-    is_max = (fn[0] == 'max')
-    #print(f"is max? {is_max}")
-    
-    # Quantidade de variaveis (x1, x2, ..., xn)
-    num_vars = len(re.findall(r'x\d+', fn[3])) 
+    data = [line.replace('−', '-').replace('–', '-') for line in data]
 
-    # Quantidade de restricoes
-    constraints = data[1:]
+    fn = data[0]
+    is_max = (fn.split()[0] == 'max')
+    obj_expr = fn.split('=', 1)[1]
+
+    constraints = [c for c in data[1:] if c.strip()]
     num_ineqs = len(constraints)
-    #print(f"Numero de restricoes: {num_ineqs}")
 
-    # Quantidade de >= e <=
+    # maior indice de variavel em toda a entrada
+    todos_indices = re.findall(r'x(\d+)', data[0] + ''.join(constraints))
+    num_vars = max(int(i) for i in todos_indices)
+
     num_more_or_equal = len([line for line in constraints if ">=" in line])
     num_less_or_equal = len([line for line in constraints if "<=" in line])
-    #print(f"Numero de maior ou igual: {num_more_or_equal}")
-    #print(f"Numero de menor ou igual: {num_less_or_equal}")
 
-    # Extrai os coeficientes da funcao objetiva
-    print(f"Funcao objetiva: {fn[3]}")
-    # agr pega decimais
-    fn_coefficients = np.array(re.findall(r'(-?\d+\.?\d*)\s*\*?\s*x\d+', fn[3]), dtype=float)
-    #print(f"Coeficientes da funcao objetiva: {fn_coefficients}")
+    fn_coefficients = parse_coefs(obj_expr, num_vars)
 
-    # Constroi a matriz custo
-    cost_matrix = np.zeros(num_vars + num_more_or_equal + num_less_or_equal)
-    cost_matrix[:len(fn_coefficients)] = fn_coefficients
-    print(f"Matriz custo: {cost_matrix}")
+    # custo: variaveis originais + excesso + folga
+    num_cols = num_vars + num_more_or_equal + num_less_or_equal
+    cost_matrix = [0.0] * num_cols
+    cost_matrix[:num_vars] = fn_coefficients
 
-    # Constroi a matriz b 
-    b_matrix = np.zeros(len(constraints))
     nums = []
-
-    # https://stackoverflow.com/questions/6696027/how-to-split-elements-of-a-list
     for constraint in constraints:
         if '<=' in constraint:
-            nums.append(constraint.split('<=')[1].strip()) 
+            nums.append(constraint.split('<=')[1].strip())
         elif '>=' in constraint:
             nums.append(constraint.split('>=')[1].strip())
-        elif '=' in constraint and not ('<=' in constraint or '>=' in constraint):
+        elif '=' in constraint:
             nums.append(constraint.split('=')[1].strip())
 
-    b_matrix = np.array([num for num in nums], dtype=float)
-    print(f"Matriz b: {b_matrix}")
+    b_matrix = [float(num) for num in nums]
 
-    # Prox passo: construir matriz A
-    # >= vira -1
-    # <= vira 1
-    # ignoramos o =
-    a_matrix = np.zeros((len(constraints), num_vars + num_more_or_equal + num_less_or_equal))
-    #print(f"Matriz A:\n{a_matrix}")
-    #print(f"Resricoes: {constraints}")
+    # matriz A: >= recebe excesso (-1), <= recebe folga (+1), = nao recebe nada
+    a_matrix = [[0.0] * num_cols for _ in range(len(constraints))]
 
-    # Primeiro colocamos os coeficientes
-    #print("vai loopar aqui: ")
-    #print(list(enumerate(constraints)))
     for i, constraint in enumerate(constraints):
-        # Inicializa um array de zeros para todas as variáveis
-        coefficients = np.zeros(num_vars)
-        #print(coefficients)
-        
-        # Encontra todos os termos na restrição com seus índices
-        terms = re.findall(r'(-?\d+\.?\d*)\s*\*?\s*x(\d+)', constraint)
-        #print(terms)
-        
-        for coef, var_idx in terms:
-            # Ajudat pois começamos com x1 porem array começa em 0
-            var_idx = int(var_idx) - 1
-            coefficients[var_idx] = float(coef)
-        
-        # Atribui os coeficientes à matriz A
-        a_matrix[i, :num_vars] = coefficients
-    
-    #print(f"Matriz A completando com os coeficientes:\n{a_matrix}")
+        lhs = re.split(r'[<>]?=', constraint)[0]
+        a_matrix[i][:num_vars] = parse_coefs(lhs, num_vars)
 
-    # Prox passo: completar com os 1 e -1
     more_or_equal_idx = num_vars
     less_or_equal_idx = num_vars + num_more_or_equal
-
     for i, constraint in enumerate(constraints):
         if '>=' in constraint:
-            a_matrix[i, more_or_equal_idx] = -1
+            a_matrix[i][more_or_equal_idx] = -1.0
             more_or_equal_idx += 1
         elif '<=' in constraint:
-            a_matrix[i, less_or_equal_idx] = 1
+            a_matrix[i][less_or_equal_idx] = 1.0
             less_or_equal_idx += 1
-    print(f"Matriz A:\n{a_matrix}")
 
-    # Se for max, multiplica a funcao objetivo por -1 (simplex minimiza)
+    # simplex minimiza; se for max, troca o sinal do objetivo
     if is_max:
-        cost_matrix = -cost_matrix
+        cost_matrix = [-c for c in cost_matrix]
 
 
 # ----------------------------------------------------------------------
-# Fase 2 do metodo Simplex
+# Metodo Simplex (Fase I + Fase II)
 # ----------------------------------------------------------------------
 
-def calcula_lambda(B, c_B):
-    # Resolve o sistema B^T * lambda = c_B
-    # Programar dps no blas.py
-    return np.linalg.solve(B.T, c_B)
-
-
-def sorteia_particao_basica(A, b, max_tentativas=1000):
-    m, n = A.shape
-    indices = np.arange(n)
-
-    for tentativa in range(max_tentativas):
-        np.random.shuffle(indices)
-        B_idx = sorted(indices[:m].tolist())
-        N_idx = sorted(indices[m:].tolist())
-
-        B = A[:, B_idx]
-
-        if abs(np.linalg.det(B)) < 1e-10:
-            continue
-
-        try:
-            x_B = np.linalg.solve(B, b)
-        except np.linalg.LinAlgError:
-            continue
-
-        if np.all(x_B >= -1e-10):
-            print(f"\nParticao basica factivel encontrada na tentativa {tentativa + 1}")
-            return B_idx, N_idx
-
-    raise RuntimeError("Nao foi possivel sortear uma particao basica factivel")
-
-
-def fase2(A, b, c, B_idx, N_idx, max_iter=100):
-    n = A.shape[1]
+def itera_simplex(A, b, c, B_idx, N_idx, max_iter=10000):
+    # iteracao simplex a partir da particao basica A=[B N]
     B_idx = list(B_idx)
     N_idx = list(N_idx)
+    m = len(A)
 
-    for iteracao in range(1, max_iter + 1):
-        print("\n" + "=" * 80)
-        print(f"Iteracao {iteracao}")
-        print("=" * 80)
+    for _ in range(max_iter):
+        # Passo 1: calculo da solucao basica  ->  resolve B x_B = b  (x_N = 0)
+        B = cols(A, B_idx)
+        x_B = solve(B, b)
 
-        B = A[:, B_idx]
-        N = A[:, N_idx]
-        c_B = c[B_idx]
-        c_N = c[N_idx]
+        # Passo 2: custos relativos
+        c_B = [c[i] for i in B_idx]
+        lam = solve(transpose(B), c_B)                 # 2.1) B^T lambda = c_B
+        c_hat = [c[j] - dot(lam, col(A, j)) for j in N_idx]   # 2.2) c_Nj - lambda^T a_Nj
+        # 2.3) variavel a entrar: regra de Dantzig (menor custo relativo)
+        k = min(range(len(N_idx)), key=lambda t: c_hat[t])
 
-        # Passo 1: calculo da solucao basica
-        x_B = np.linalg.solve(B, b)
-        f_x = c_B @ x_B
-        print(f"Indices basicos (B):     {[i + 1 for i in B_idx]}")
-        print(f"Indices nao-basicos (N): {[i + 1 for i in N_idx]}")
-        print(f"x_B = {x_B}")
-        print(f"f(x) = {f_x}")
+        # Passo 3: teste de otimalidade  ->  se c_hat_Nk >= 0, e otima
+        if c_hat[k] >= -1e-9:
+            return 'otimo', B_idx, N_idx, x_B
 
-        # Passo 2: calculo dos custos relativos
-        # 2.1) vetor multiplicador simplex
-        lam = calcula_lambda(B, c_B)
-        print(f"lambda = {lam}")
+        # Passo 4: direcao simplex  ->  resolve B y = a_Nk
+        y = solve(B, col(A, N_idx[k]))
 
-        # 2.2) custos relativos
-        c_hat_N = c_N - lam @ N
-        print(f"custos relativos: {c_hat_N}")
+        # Passo 5: passo e variavel a sair (razao minima)
+        positivos = [i for i in range(m) if y[i] > 1e-9]
+        if not positivos:                              # y <= 0  ->  f(x) -> -inf
+            return 'ilimitado', B_idx, N_idx, x_B
+        razao_min = min(x_B[i] / y[i] for i in positivos)
+        # entre empates, menor indice basico (regra de Bland p/ evitar ciclagem)
+        l = min((i for i in positivos if x_B[i] / y[i] <= razao_min + 1e-9),
+                key=lambda i: B_idx[i])
 
-        # 2.3) determinacao da variavel a entrar na base
-        k = int(np.argmin(c_hat_N))
-        c_hat_N_k = c_hat_N[k]
-
-        # Passo 3: teste de otimalidade
-        if c_hat_N_k >= -1e-10:
-            print("\nSolucao otima encontrada!")
-            x = np.zeros(n)
-            x[B_idx] = x_B
-            return x, f_x
-
-        print(f"Entra na base: x{N_idx[k] + 1} (custo relativo = {c_hat_N_k})")
-
-        # Passo 4: calculo da direcao simplex
-        a_Nk = A[:, N_idx[k]]
-        y = np.linalg.solve(B, a_Nk)
-        print(f"y = {y}")
-
-        # Passo 5: determinacao do passo e variavel a sair da base
-        if np.all(y <= 0):
-            print("Problema nao tem solucao otima finita (f(x) -> -inf)")
-            return None, -np.inf
-
-        razoes = np.full_like(y, np.inf, dtype=float)
-        mask = y > 1e-10
-        razoes[mask] = x_B[mask] / y[mask]
-        l = int(np.argmin(razoes))
-        epsilon = razoes[l]
-        print(f"epsilon = {epsilon}, sai da base: x{B_idx[l] + 1}")
-
-        # Passo 6: atualizacao da particao basica
+        # Passo 6: atualizacao - troca a l-esima coluna de B pela k-esima de N
         B_idx[l], N_idx[k] = N_idx[k], B_idx[l]
 
-    print("Limite de iteracoes atingido")
-    return None, None
+    return 'limite', B_idx, N_idx, x_B
+
+
+def resolve(A, b, c, num_vars):
+    # min c^T x, s.a Ax = b, x >= 0 pelo metodo das duas fases
+    A = [list(linha) for linha in A]
+    b = list(b)
+    c = list(c)
+    m = len(A)
+    n = len(A[0])
+
+    # garante b >= 0
+    for i in range(m):
+        if b[i] < 0:
+            A[i] = [-v for v in A[i]]
+            b[i] = -b[i]
+
+    # ---- Fase I: uma variavel artificial por restricao (base = identidade) ----
+    A1 = [A[i] + [1.0 if j == i else 0.0 for j in range(m)] for i in range(m)]
+    art = list(range(n, n + m))
+    c_fase1 = [0.0] * n + [1.0] * m
+
+    status, B_idx, N_idx, x_B = itera_simplex(A1, b, c_fase1, art, list(range(n)))
+
+    valor_artificial = dot([c_fase1[i] for i in B_idx], x_B)
+    if valor_artificial > 1e-7:
+        return 'infactivel', None, None
+
+    # tira artificiais que sobraram na base (nivel zero) por pivoteamento
+    for pos in range(m):
+        if B_idx[pos] in art:
+            Binv = inverse(cols(A1, B_idx))
+            for jp, j in enumerate(N_idx):
+                if j in art:
+                    continue
+                if abs(matvec(Binv, col(A1, j))[pos]) > 1e-7:
+                    B_idx[pos], N_idx[jp] = N_idx[jp], B_idx[pos]
+                    break
+
+    # ---- Fase II: custo original, artificiais proibidas de reentrar na base ----
+    c_fase2 = list(c) + [0.0] * m
+    N_idx = [j for j in N_idx if j not in art]
+
+    status, B_idx, N_idx, x_B = itera_simplex(A1, b, c_fase2, B_idx, N_idx)
+
+    if status == 'ilimitado':
+        return 'ilimitado', None, None
+
+    x = [0.0] * (n + m)
+    for i, bi in enumerate(B_idx):
+        x[bi] = x_B[i]
+    f = dot(c_fase2, x)
+    return 'otimo', x[:num_vars], f
+
+
+def limpa(v):
+    v = round(v, 6)
+    return 0.0 if v == 0 else v
 
 
 if __name__ == "__main__":
-    print("\n" + "#" * 80)
-    print("# Fase 2 do Simplex")
-    print("#" * 80)
+    status, x_otimo, f_otimo = resolve(a_matrix, b_matrix, cost_matrix, num_vars)
 
-    B_idx, N_idx = sorteia_particao_basica(a_matrix, b_matrix)
-    x_otimo, f_otimo = fase2(a_matrix, b_matrix, cost_matrix, B_idx, N_idx)
+    print(fn.strip())
+    for restricao in constraints:
+        print(restricao.strip())
+    print()
 
-    if x_otimo is not None:
-        print("\n" + "#" * 80)
-        print(f"x* = {x_otimo}")
-        # Se o problema original era de max, inverte o sinal do otimo
+    if status == 'otimo':
         valor_original = -f_otimo if is_max else f_otimo
-        print(f"f(x*) = {valor_original}")
-        print("#" * 80)
+        for i, xi in enumerate(x_otimo):
+            print(f"x{i + 1} = {limpa(xi)}")
+        print(f"z = {limpa(valor_original)}")
+    elif status == 'ilimitado':
+        print("Problema ilimitado")
+    else:
+        print("Problema infactivel")
