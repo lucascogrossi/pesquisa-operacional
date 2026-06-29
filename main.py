@@ -4,7 +4,6 @@ from BLAS import dot, matvec, inverse, transpose, solve
 
 
 def parse_coefs(expr, num_vars):
-    # coeficientes implicitos: 'x1' -> 1, '-x2' -> -1
     coefs = [0.0] * num_vars
     for raw, idx in re.findall(r'([+-]?\s*\d*\.?\d*)\s*\*?\s*x(\d+)', expr):
         s = raw.replace(' ', '')
@@ -26,123 +25,111 @@ def cols(A, idxs):
     return [[linha[j] for j in idxs] for linha in A]
 
 
-with open('data.txt', 'r') as f:
-    data = f.readlines()
-    data = [line.replace('−', '-').replace('–', '-') for line in data]
+def parse_constraint(line, num_vars):
+    if '<=' in line:
+        sinal = '<='
+    elif '>=' in line:
+        sinal = '>='
+    else:
+        sinal = '='
+    lhs, rhs = re.split(r'[<>]?=', line, maxsplit=1)
+    return parse_coefs(lhs, num_vars), sinal, float(rhs.strip())
 
-    fn = data[0]
+
+def parse_problem(linhas):
+    linhas = [l.replace('−', '-').replace('–', '-') for l in linhas]
+    fn = linhas[0]
     is_max = (fn.split()[0] == 'max')
     obj_expr = fn.split('=', 1)[1]
 
-    constraints = [c for c in data[1:] if c.strip()]
-    num_ineqs = len(constraints)
-
-    # maior indice de variavel em toda a entrada
-    todos_indices = re.findall(r'x(\d+)', data[0] + ''.join(constraints))
+    raw = [c for c in linhas[1:] if c.strip()]
+    todos_indices = re.findall(r'x(\d+)', ' '.join([fn] + raw))
     num_vars = max(int(i) for i in todos_indices)
 
-    num_more_or_equal = len([line for line in constraints if ">=" in line])
-    num_less_or_equal = len([line for line in constraints if "<=" in line])
+    obj_coefs = parse_coefs(obj_expr, num_vars)
+    constraints = [parse_constraint(c, num_vars) for c in raw]
+    return {
+        'fn': fn,
+        'is_max': is_max,
+        'obj_coefs': obj_coefs,
+        'constraints': constraints,
+        'raw': raw,
+        'num_vars': num_vars,
+    }
 
-    fn_coefficients = parse_coefs(obj_expr, num_vars)
 
-    # custo: variaveis originais + excesso + folga
-    num_cols = num_vars + num_more_or_equal + num_less_or_equal
-    cost_matrix = [0.0] * num_cols
-    cost_matrix[:num_vars] = fn_coefficients
+def build_standard(constraints, num_vars):
+    m = len(constraints)
+    num_extra = sum(1 for (_, s, _) in constraints if s in ('<=', '>='))
+    num_cols = num_vars + num_extra
 
-    nums = []
-    for constraint in constraints:
-        if '<=' in constraint:
-            nums.append(constraint.split('<=')[1].strip())
-        elif '>=' in constraint:
-            nums.append(constraint.split('>=')[1].strip())
-        elif '=' in constraint:
-            nums.append(constraint.split('=')[1].strip())
+    A = [[0.0] * num_cols for _ in range(m)]
+    b = [0.0] * m
+    extra = num_vars
+    for i, (coefs, sinal, rhs) in enumerate(constraints):
+        A[i][:num_vars] = coefs
+        if sinal == '<=':
+            A[i][extra] = 1.0
+            extra += 1
+        elif sinal == '>=':
+            A[i][extra] = -1.0
+            extra += 1
+        b[i] = rhs
+    return A, b, num_cols
 
-    b_matrix = [float(num) for num in nums]
 
-    # matriz A: >= recebe excesso (-1), <= recebe folga (+1), = nao recebe nada
-    a_matrix = [[0.0] * num_cols for _ in range(len(constraints))]
-
-    for i, constraint in enumerate(constraints):
-        lhs = re.split(r'[<>]?=', constraint)[0]
-        a_matrix[i][:num_vars] = parse_coefs(lhs, num_vars)
-
-    more_or_equal_idx = num_vars
-    less_or_equal_idx = num_vars + num_more_or_equal
-    for i, constraint in enumerate(constraints):
-        if '>=' in constraint:
-            a_matrix[i][more_or_equal_idx] = -1.0
-            more_or_equal_idx += 1
-        elif '<=' in constraint:
-            a_matrix[i][less_or_equal_idx] = 1.0
-            less_or_equal_idx += 1
-
-    # simplex minimiza; se for max, troca o sinal do objetivo
+def solve_problem(constraints, obj_coefs, num_vars, is_max):
+    A, b, num_cols = build_standard(constraints, num_vars)
+    c = [0.0] * num_cols
+    c[:num_vars] = obj_coefs
     if is_max:
-        cost_matrix = [-c for c in cost_matrix]
+        c = [-v for v in c]
+    return resolve(A, b, c, num_vars)
 
-
-# ----------------------------------------------------------------------
-# Metodo Simplex (Fase I + Fase II)
-# ----------------------------------------------------------------------
 
 def itera_simplex(A, b, c, B_idx, N_idx, max_iter=10000):
-    # iteracao simplex a partir da particao basica A=[B N]
     B_idx = list(B_idx)
     N_idx = list(N_idx)
     m = len(A)
 
     for _ in range(max_iter):
-        # Passo 1: calculo da solucao basica  ->  resolve B x_B = b  (x_N = 0)
         B = cols(A, B_idx)
         x_B = solve(B, b)
 
-        # Passo 2: custos relativos
         c_B = [c[i] for i in B_idx]
-        lam = solve(transpose(B), c_B)                 # B^T lambda = c_B
-        c_hat = [c[j] - dot(lam, col(A, j)) for j in N_idx]   # c_Nj - lambda^T a_Nj
-        # variavel a entrar: regra de Dantzig (menor custo relativo)
+        lam = solve(transpose(B), c_B)
+        c_hat = [c[j] - dot(lam, col(A, j)) for j in N_idx]
         k = min(range(len(N_idx)), key=lambda t: c_hat[t])
 
-        # Passo 3: teste de otimalidade  ->  se c_hat_Nk >= 0, e otima
         if c_hat[k] >= -1e-9:
             return 'otimo', B_idx, N_idx, x_B
 
-        # Passo 4: direcao simplex  ->  resolve B y = a_Nk
         y = solve(B, col(A, N_idx[k]))
 
-        # Passo 5: passo e variavel a sair (razao minima)
         positivos = [i for i in range(m) if y[i] > 1e-9]
-        if not positivos:                              # y <= 0  ->  f(x) -> -inf
+        if not positivos:
             return 'ilimitado', B_idx, N_idx, x_B
         razao_min = min(x_B[i] / y[i] for i in positivos)
-        # entre empates, menor indice basico (regra de Bland p/ evitar ciclagem)
         l = min((i for i in positivos if x_B[i] / y[i] <= razao_min + 1e-9),
                 key=lambda i: B_idx[i])
 
-        # Passo 6: atualizacao - troca a l-esima coluna de B pela k-esima de N
         B_idx[l], N_idx[k] = N_idx[k], B_idx[l]
 
     return 'limite', B_idx, N_idx, x_B
 
 
 def resolve(A, b, c, num_vars):
-    # min c^T x, s.a Ax = b, x >= 0 pelo metodo das duas fases
     A = [list(linha) for linha in A]
     b = list(b)
     c = list(c)
     m = len(A)
     n = len(A[0])
 
-    # garante b >= 0
     for i in range(m):
         if b[i] < 0:
             A[i] = [-v for v in A[i]]
             b[i] = -b[i]
 
-    # Fase I: uma variavel artificial por restricao (base = identidade)
     A1 = [A[i] + [1.0 if j == i else 0.0 for j in range(m)] for i in range(m)]
     art = list(range(n, n + m))
     c_fase1 = [0.0] * n + [1.0] * m
@@ -153,7 +140,6 @@ def resolve(A, b, c, num_vars):
     if valor_artificial > 1e-7:
         return 'infactivel', None, None
 
-    # tira artificiais que sobraram na base (nivel zero) por pivoteamento
     for pos in range(m):
         if B_idx[pos] in art:
             Binv = inverse(cols(A1, B_idx))
@@ -164,7 +150,6 @@ def resolve(A, b, c, num_vars):
                     B_idx[pos], N_idx[jp] = N_idx[jp], B_idx[pos]
                     break
 
-    # Fase II: custo original, artificiais proibidas de reentrar na base
     c_fase2 = list(c) + [0.0] * m
     N_idx = [j for j in N_idx if j not in art]
 
@@ -186,15 +171,19 @@ def limpa(v):
 
 
 if __name__ == "__main__":
-    status, x_otimo, f_otimo = resolve(a_matrix, b_matrix, cost_matrix, num_vars)
+    with open('data.txt', 'r') as f:
+        prob = parse_problem(f.readlines())
 
-    print(fn.strip())
-    for restricao in constraints:
+    status, x_otimo, f_otimo = solve_problem(
+        prob['constraints'], prob['obj_coefs'], prob['num_vars'], prob['is_max'])
+
+    print(prob['fn'].strip())
+    for restricao in prob['raw']:
         print(restricao.strip())
     print()
 
     if status == 'otimo':
-        valor_original = -f_otimo if is_max else f_otimo
+        valor_original = -f_otimo if prob['is_max'] else f_otimo
         for i, xi in enumerate(x_otimo):
             print(f"x{i + 1} = {limpa(xi)}")
         print(f"z = {limpa(valor_original)}")

@@ -51,11 +51,9 @@ def roda(content):
 def confere(esperado, status, valor):
     if isinstance(esperado, str):
         return status == esperado
-    # numerico: compara magnitude (independe da convencao de sinal do min)
     return status == 'VAL' and abs(abs(valor) - abs(esperado)) <= TOL + TOL * abs(esperado)
 
 
-# Preserva o data.txt do usuario (os testes sobrescrevem o arquivo)
 try:
     with open('data.txt', 'r') as f:
         data_original = f.read()
@@ -73,7 +71,6 @@ try:
         marca = "PASS" if ok else "FAIL"
         print(f"[{marca}] {name:7} esperado={esp_txt:9} obtido={obtido}")
 finally:
-    # restaura o data.txt original do usuario
     if data_original is not None:
         with open('data.txt', 'w') as f:
             f.write(data_original)
