@@ -1,11 +1,3 @@
-"""
-  - multiplicacao de matrizes e matriz-vetor
-  - produto escalar
-  - determinante por expansao de Laplace
-  - eliminacao de Gauss-Jordan para resolver Ax = b
-  - inversa por Gauss-Jordan
-"""
-
 EPS = 1e-12
 
 
@@ -49,7 +41,7 @@ def dot(u, v):
 
 
 def determinant(A):
-    """Determinante por expansao de Laplace (recursivo), conforme PDF secao 3.2."""
+    """Determinante por expansao de Laplace (recursivo)."""
     n = len(A)
     if n == 1:
         return A[0][0]
@@ -82,7 +74,7 @@ def solve(A, b):
 
 
 def inverse(A):
-    """Inversa por Gauss-Jordan: [A | I] -> [I | A^-1], conforme PDF secao 3.3."""
+    """Inversa por Gauss-Jordan: [A | I] -> [I | A^-1]."""
     n = len(A)
     M = [list(A[i]) + [1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
     for col in range(n):
